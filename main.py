@@ -22,6 +22,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from ctypes import pointer
 from ctypes.wintypes import MSG
 
+from helpers.printing import pretty_print_result
 from helpers.rectangle import rectangle_area
 from helpers.window import WindowResult, update_capture_state, finalize_capture_state
 from windows.type import WINEVENTPROC
@@ -31,15 +32,7 @@ from windows.function import get_message_w, post_thread_message_w, translate_mes
     set_win_event_hook, unhook_win_event, get_current_thread_id
 
 
-def pretty_print_duration(prefix: str, duration: int):
-    milliseconds = duration % 1000
-    seconds = int((duration / 1000) % 60)
-    minutes = int((duration / 60000) % 60)
-    hours = int((duration / 3600000) % 24)
-    print(f"{prefix} {hours} h {minutes} m {seconds} s {milliseconds} ms")
-
-
-def pretty_print_results(results: frozenset[WindowResult]):
+def print_results(results: frozenset[WindowResult]):
     total_time_all = 0
     total_area_all = 0
     for result1 in results:
@@ -48,21 +41,18 @@ def pretty_print_results(results: frozenset[WindowResult]):
             total_area_all += rectangle_area(state.rectangle)
 
     for result in results:
-        print(f"Program: {result.process}")
         aggregate_time = 0
         aggregate_area = 0
+        titles = set()
         for state in result.states:
+            titles.add(state.title)
             aggregate_time += state.duration
             aggregate_area += rectangle_area(state.rectangle)
         share_time = aggregate_time / total_time_all
         share_area = aggregate_area / total_area_all
-        average_area = aggregate_area / len(result.states)
+        average_area = int(aggregate_area / len(result.states))
 
-        pretty_print_duration("Gross Active Time:", aggregate_time)
-        print(f"Share Active Time: {share_time * 100} %")
-        print(f"Average Screen Area: {average_area} px^2")
-        print(f"Share Screen Area: {share_area * 100} %")
-        print("")
+        pretty_print_result(result.process, titles, aggregate_time, share_time, average_area, share_area)
 
 
 async def routine_message_queue(event_loop, executor):
@@ -107,7 +97,7 @@ async def routine_message_queue(event_loop, executor):
         unhook_win_event(event_hook_handle)
 
         finalized_results = finalize_capture_state(captures, states)
-        pretty_print_results(finalized_results)
+        print_results(finalized_results)
 
         return finalized_results
 
