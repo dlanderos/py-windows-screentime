@@ -128,9 +128,9 @@ def visible_window_captures() -> frozenset[WindowCapture]:
     visible_windows = set()
 
     for index, window in enumerate(filtered_windows):
-        # Plain desktop doesn't count!
-        if index == 0 and window.process == "\\Device\\HarddiskVolume3\\Windows\\System32\\ApplicationFrameHost.exe":
-            break
+        # If the window doesn't have a title, it probably isn't interesting enough to track.
+        if not window.title:
+            continue
 
         # Continue iterating as long as there is available screen space left for a window to occupy.
         if available_area <= 0:
