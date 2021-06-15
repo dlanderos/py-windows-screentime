@@ -16,18 +16,19 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from collections import OrderedDict
-from ctypes import pointer, create_unicode_buffer, sizeof
-from ctypes.wintypes import HWND, DWORD, MAX_PATH, RECT, INT
+from ctypes import create_unicode_buffer, sizeof, byref
+from ctypes.wintypes import DWORD, MAX_PATH, RECT, INT
 from dataclasses import dataclass, field
 from time import time
-from helpers.rectangle import Rectangle, rectangle_from_structure, rectangle_area, rectangle_intersection
-from windows.definition import PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, WS_VISIBLE, GWL_STYLE, WS_SYSMENU, \
-    DWMWA_CLOAKED, S_OK
-from windows.function import get_window_thread_process_id, open_process, k32_get_process_image_file_name_w, \
-    get_window_text_length_w, get_window_text_w, get_window_rect, dwm_get_window_attribute, get_window_long_ptr_w, \
-    is_iconic, enum_windows, get_desktop_window
-from windows.type import WNDENUMPROC
+
+from helpers.rectangle import Rectangle, rectangle_from_rect, rectangle_intersection
+from winapi import (
+    S_OK, NULL
+)
+from winapi.dwm import DwmGetWindowAttribute, DWMWA_CLOAKED
+from winapi.kernel import OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, GetProcessImageFileNameW
+from winapi.user import GetWindowThreadProcessId, GetWindowTextLengthW, GetWindowTextW, WNDENUMPROC, \
+    GetWindowLongPtrW, GWL_STYLE, WS_VISIBLE, IsIconic, EnumWindows, GetClientRect, GetClassNameW, MAX_CLASS_NAME
 
 
 @dataclass(frozen=True)
@@ -59,102 +60,99 @@ class WindowResult:
     states: frozenset[WindowState] = field(hash=True)
 
 
-def window_capture_from_handle(window_handle: HWND) -> WindowCapture:
-    # Retrieve the thread process ID of the window's application
-    thread_process_id = DWORD(0)
-    get_window_thread_process_id(window_handle, pointer(thread_process_id))
-
-    # Retrieve the process handle
-    process_handle = open_process(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, thread_process_id)
-
-    # Read the process's file name
-    process_file_name_buffer_length = MAX_PATH + 1
-    process_file_name_buffer = create_unicode_buffer(process_file_name_buffer_length)
-    k32_get_process_image_file_name_w(process_handle, process_file_name_buffer, DWORD(process_file_name_buffer_length))
-
-    # Get the window's title
-    window_text_buffer_length = get_window_text_length_w(window_handle) + 1
-    window_text_buffer = create_unicode_buffer(window_text_buffer_length)
-    get_window_text_w(window_handle, window_text_buffer, INT(window_text_buffer_length))
-
-    # Get the windows' rectangle (RECT)
-    rectangle_structure = RECT()
-    get_window_rect(window_handle, pointer(rectangle_structure))
-
-    # Return the Window data
-    # noinspection PyTypeChecker
-    return WindowCapture(
-        handle=window_handle,
-        process=process_file_name_buffer.value,
-        title=window_text_buffer.value,
-        rectangle=rectangle_from_structure(rectangle_structure),
-        time_start=round(time() * 1000)
-    )
+IGNORED_CLASS_NAMES = frozenset(
+    {
+        "Shell_TrayWnd",
+        "Internet Explorer_Hidden",
+        "Progman",
+        "WorkerW",
+    }
+)
 
 
 def visible_window_captures() -> frozenset[WindowCapture]:
-    # Use an ordered dictionary to preserve Z-Index order
-    filtered_windows = OrderedDict()
+    previous_rectangles: set[Rectangle] = set()
+    captures: set[WindowCapture] = set()
 
     @WNDENUMPROC
-    def window_enumerate_callback(window_handle, _):
-        window_style = get_window_long_ptr_w(window_handle, GWL_STYLE)
-        # Ensure the window is visible and has a normal style
-        if window_style & WS_VISIBLE and window_style & WS_SYSMENU:
-            # Retrieve whether or not the window is cloaked
-            cloaked_value = INT(0)
-            if dwm_get_window_attribute(
-                    window_handle,
-                    DWMWA_CLOAKED,
-                    pointer(cloaked_value),
-                    sizeof(INT)
-            ) != S_OK:
-                print("Failed to get DWMWA_CLOAKED attribute")
-                return False
+    def enumerate_windows2(handle: int, _unused_parameter: int) -> bool:
 
-            # Ensure that the window has NOT been cloaked and is NOT iconic
-            if cloaked_value != 0 and not is_iconic(window_handle):
-                # Retrieve the window data from the handle and add it to the map
-                filtered_windows[window_capture_from_handle(window_handle)] = 0
+        # Ensure the window has the visible style.
+        style = GetWindowLongPtrW(handle, GWL_STYLE)
+        if not style & WS_VISIBLE:
+            return True
+
+        # Ensure the window is not cloaked.
+        cloaked = INT(0)
+        if DwmGetWindowAttribute(handle, DWMWA_CLOAKED, byref(cloaked), sizeof(INT)) != S_OK:
+            # TODO: debug for when this fails?
+            return True
+        if cloaked:
+            return True
+
+        # Ensure the window is not iconic.
+        if IsIconic(handle):
+            return True
+
+        # Ensure the window has a valid class name.
+        buffer_class_name_length = MAX_CLASS_NAME + 1
+        buffer_class_name = create_unicode_buffer(buffer_class_name_length)
+        if not GetClassNameW(handle, buffer_class_name, buffer_class_name_length):
+            # TODO: debug for when this fails?
+            return True
+        if buffer_class_name.value in IGNORED_CLASS_NAMES:
+            return True
+
+        # Attempt to retrieve the process and thread id of the window.
+        process_id = DWORD(0)
+        thread_id = GetWindowThreadProcessId(handle, byref(process_id))
+        if not process_id or not thread_id:
+            # TODO: debug for when this fails?
+            return True
+
+        # Attempt to retrieve the window's text (current title).
+        buffer_text_length = GetWindowTextLengthW(handle) + 1
+        buffer_text = create_unicode_buffer(buffer_text_length)
+        if not GetWindowTextW(handle, buffer_text, buffer_text_length):
+            # TODO: debug for when this fails?
+            return True
+
+        # Attempt to retrieve the window's client area (rectangle)
+        rect = RECT()
+        if not GetClientRect(handle, byref(rect)):
+            # TODO: debug for when this fails?
+            return True
+        rectangle = rectangle_from_rect(rect)
+
+        # Ensure the window has some portions that are visible
+        area = rectangle.area
+        for previous_rectangle in previous_rectangles:
+            area -= rectangle_intersection(rectangle, previous_rectangle).area
+        if area <= 0:
+            return True
+
+        # Retrieve the process handle
+        process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, thread_id)
+
+        # Read the process's file name
+        process_file_name_buffer_length = MAX_PATH + 1
+        process_file_name_buffer = create_unicode_buffer(process_file_name_buffer_length)
+        GetProcessImageFileNameW(process_handle, process_file_name_buffer, process_file_name_buffer_length)
+
+        previous_rectangles.add(rectangle)
+        captures.add(WindowCapture(
+            handle=handle,
+            process=process_file_name_buffer.value,
+            title=buffer_text.value,
+            rectangle=rectangle,
+            time_start=round(time() * 1000)
+        ))
+
         return True
 
-    # Enumerate through all windows.
-    # This will block the thread until the callback finished.
-    enum_windows(window_enumerate_callback)
+    EnumWindows(enumerate_windows2, NULL)
 
-    container_window = window_capture_from_handle(get_desktop_window())
-    available_area = rectangle_area(container_window.rectangle)
-
-    visible_windows = set()
-
-    for index, window in enumerate(filtered_windows):
-        # If the window doesn't have a title, it probably isn't interesting enough to track.
-        if not window.title:
-            continue
-
-        # Continue iterating as long as there is available screen space left for a window to occupy.
-        if available_area <= 0:
-            break
-        # Get the windows overall area
-        window_area = rectangle_area(window.rectangle)
-
-        # Adjust the window's area to reflect parts of it that are covered by another window above it.
-        for previous_window in visible_windows:
-            area = rectangle_area(
-                rectangle_intersection(previous_window.rectangle, window.rectangle)
-            )
-            window_area -= area
-
-        # Determine if the window is completely covered by another.
-        # If it is, then it can be skipped.
-        if window_area <= 0:
-            continue
-
-        # Add the window to the list of visible windows.
-        available_area -= window_area
-        visible_windows.add(window)
-
-    return frozenset(visible_windows)
+    return frozenset(captures)
 
 
 def capture_to_state(capture: WindowCapture) -> WindowState:
