@@ -37,7 +37,7 @@ def print_results(results: frozenset[WindowResult]):
     for result1 in results:
         for state in result1.states:
             total_time_all += state.duration
-            total_area_all += rectangle_area(state.rectangle)
+            total_area_all += state.rectangle.area
 
     for result in results:
         aggregate_time = 0
@@ -46,7 +46,7 @@ def print_results(results: frozenset[WindowResult]):
         for state in result.states:
             titles.add(state.title)
             aggregate_time += state.duration
-            aggregate_area += rectangle_area(state.rectangle)
+            aggregate_area += state.rectangle.area
         share_time = aggregate_time / total_time_all
         share_area = aggregate_area / total_area_all
         average_area = int(aggregate_area / len(result.states))

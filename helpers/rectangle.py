@@ -16,40 +16,42 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from dataclasses import dataclass
-from ctypes.wintypes import RECT
+from ctypes.wintypes import RECT, LONG
+from dataclasses import dataclass, field
+from typing import Union
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=True)
 class Rectangle:
-    left: int = 0
-    top: int = 0
-    right: int = 0
-    bottom: int = 0
+    left: int = field(hash=True, compare=True, default=0)
+    top: int = field(hash=True, compare=True, default=0)
+    right: int = field(hash=True, compare=True, default=0)
+    bottom: int = field(hash=True, compare=True, default=0)
+    width: int = field(hash=True, compare=True, default=0)
+    height: int = field(hash=True, compare=True, default=0)
+    area: int = field(hash=True, compare=True, default=0)
 
 
-def rectangle_from_structure(structure: RECT):
-    # noinspection PyTypeChecker
-    return Rectangle(
-        left=structure.left,
-        top=structure.top,
-        right=structure.right,
-        bottom=structure.bottom
+def rectangle_from_positions(
+        left: Union[int, LONG],
+        top: Union[int, LONG],
+        right: Union[int, LONG],
+        bottom: Union[int, LONG]
+):
+    width = abs(right - left)
+    height = abs(bottom - top)
+    area = width * height
+    return Rectangle(left, top, right, bottom, width, height, area)
+
+
+def rectangle_from_rect(rect: RECT) -> Rectangle:
+    return rectangle_from_positions(rect.left, rect.top, rect.right, rect.bottom)
+
+
+def rectangle_intersection(region1: Rectangle, region2: Rectangle) -> Rectangle:
+    return rectangle_from_positions(
+        max(region1.left, region2.left),
+        max(region1.top, region2.top),
+        min(region1.right, region2.right),
+        min(region1.bottom, region2.bottom),
     )
-
-
-def rectangle_area(rectangle: Rectangle):
-    return (rectangle.right - rectangle.left) * (rectangle.bottom - rectangle.top)
-
-
-def rectangle_intersection(rectangle1: Rectangle, rectangle2: Rectangle) -> Rectangle:
-    return Rectangle(
-        left=max(rectangle1.left, rectangle2.left),
-        top=max(rectangle1.top, rectangle2.top),
-        right=min(rectangle1.right, rectangle2.right),
-        bottom=min(rectangle1.bottom, rectangle2.bottom)
-    )
-
-
-def idk_yet(rectangle1):
-    pass
