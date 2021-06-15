@@ -23,13 +23,12 @@ from ctypes import pointer
 from ctypes.wintypes import MSG
 
 from helpers.printing import pretty_print_result
-from helpers.rectangle import rectangle_area
 from helpers.window import WindowResult, update_capture_state, finalize_capture_state
-from windows.type import WINEVENTPROC
-from windows.definition import EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, \
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_QUIT
-from windows.function import get_message_w, post_thread_message_w, translate_message, dispatch_message_w, \
-    set_win_event_hook, unhook_win_event, get_current_thread_id
+from winapi import NULL
+from winapi.kernel import GetCurrentThreadId
+from winapi.user import SetWinEventHook, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, WINEVENT_OUTOFCONTEXT, \
+    WINEVENT_SKIPOWNPROCESS, GetMessageW, TranslateMessage, DispatchMessageW, UnhookWinEvent, WINEVENTPROC, \
+    EVENT_SYSTEM_MINIMIZESTART, PostThreadMessageW, WM_QUIT
 
 
 def print_results(results: frozenset[WindowResult]):
@@ -69,16 +68,19 @@ async def routine_message_queue(event_loop, executor):
         update_capture_state(captures, states)
 
         # Get this thread's ID
-        current_thread_id = get_current_thread_id()
+        current_thread_id = GetCurrentThreadId()
         thread_ids.append(current_thread_id)
 
         # Attempt to create the event hook.
         # It must be created within the same thread as the message queue receiver for the callback to be fired.
-        event_hook_handle = set_win_event_hook(
-            callback=win_event_hook_callback,
-            event_filter_min=EVENT_SYSTEM_FOREGROUND,
-            event_filter_max=EVENT_SYSTEM_MINIMIZEEND,
-            flags=WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+        event_hook_handle = SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_MINIMIZEEND,
+            NULL,
+            win_event_hook_callback,
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
         )
 
         # Determine if the hook was created successfully.
@@ -89,12 +91,12 @@ async def routine_message_queue(event_loop, executor):
         # Read all readily available messages from the queue.
         # Loops forever until it receives a WM_QUIT message.
         message_pointer = pointer(MSG())
-        while get_message_w(message_pointer):
-            translate_message(message_pointer)
-            dispatch_message_w(message_pointer)
+        while GetMessageW(message_pointer, NULL, 0, 0):
+            TranslateMessage(message_pointer)
+            DispatchMessageW(message_pointer)
 
         # Unhook the event handler.
-        unhook_win_event(event_hook_handle)
+        UnhookWinEvent(event_hook_handle)
 
         finalized_results = finalize_capture_state(captures, states)
         print_results(finalized_results)
@@ -118,7 +120,7 @@ async def routine_message_queue(event_loop, executor):
     except CancelledError:
         # Tell the message queue in the other thread that it can stop now (if the thread was even able to start).
         if len(thread_ids) == 1:
-            post_thread_message_w(thread_ids[0], WM_QUIT)
+            PostThreadMessageW(thread_ids[0], WM_QUIT, 0, 0)
 
 
 async def routine_user_input(event_loop, executor):
