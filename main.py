@@ -108,8 +108,7 @@ async def routine_message_queue(event_loop, executor):
     # The annotation is important so Python knows its a callback function using Windows calling procedures.
     @WINEVENTPROC
     def win_event_hook_callback(hook, event, hwnd, id_object, id_child, dw_event_thread, dw_event_time):
-        if event == EVENT_SYSTEM_FOREGROUND or event == EVENT_SYSTEM_MINIMIZESTART or event == EVENT_SYSTEM_MINIMIZEEND:
-            update_capture_state(captures, states)
+        update_capture_state(captures, states)
 
     try:
         # Run the message queue receiver in a separate thread so it doesn't block the main one.
