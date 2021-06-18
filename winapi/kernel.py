@@ -46,7 +46,7 @@ GetCurrentThreadId.argtypes = None
 
 # processthreadsapi.h
 # https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess
-OpenProcess: Callable[[int, bool, int], int] = windll.kernel32.OpenProcess
+OpenProcess: Callable[[int, bool, Union[int, DWORD]], int] = windll.kernel32.OpenProcess
 OpenProcess.restype = HANDLE
 OpenProcess.argtypes = [DWORD, BOOL, DWORD]
 

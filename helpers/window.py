@@ -132,7 +132,10 @@ def visible_window_captures() -> frozenset[WindowCapture]:
             return True
 
         # Retrieve the process handle
-        process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, thread_id)
+        process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, process_id)
+        if not process_handle:
+            # TODO: debug for when this fails?
+            return True
 
         # Read the process's file name
         process_file_name_buffer_length = MAX_PATH + 1
